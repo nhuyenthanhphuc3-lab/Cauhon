@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Làm ny anh nha ♥</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; touch-action:none;
+    background: radial-gradient(ellipse at center, #2a0008 0%, #000 70%); }
+  canvas { display:block; }
+  #hud {
+    position: fixed; top: 12px; left: 12px; right:12px; color: #ffd6dc;
+    font-family: -apple-system, "Segoe UI", sans-serif; font-size: 12px;
+    text-shadow: 0 1px 4px #000; pointer-events:none; opacity:.9;
+  }
+  #hud b { color:#ff5577; font-size:14px; }
+  #loader {
+    position: fixed; bottom: 12px; left: 12px; color:#ffb0bd;
+    font-family: monospace; font-size: 11px; opacity:.7;
+  }
+  #title {
+    position: fixed; bottom: 20px; left:0; right:0; text-align:center;
+    font-family: "Brush Script MT", cursive; color:#ff6680;
+    font-size: 28px; text-shadow: 0 0 12px #ff224488, 0 2px 6px #000;
+    pointer-events:none; animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+</style>
+</head>
+<body>
+<div id="hud"><b>Be my girlfriend, NGÂN</b><br/>Chạm & kéo để xoay · Pinch để zoom</div>
+<div id="loader">Đang tải ảnh…</div>
+<div id="title">Làm ny anh nha </div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const isMobile = innerWidth < 700;
+const HEART_COUNT = isMobile ? 320 : 600;
+const RING_COUNT  = isMobile ? 90  : 150;
+const HEART_SCALE = 7;
+const RING_RADIUS = 11;
+const SPRITE_SIZE = isMobile ? 0.7 : 0.6;
+
+// ---------- scene ----------
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x000000, 22, 55);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(0, 1, isMobile ? 26 : 22);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 9;
+controls.maxDistance = 55;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.5;
+controls.enablePan = false;
+
+// ---------- heart shape (dense & solid) ----------
+function heartSurface(t, phi) {
+  const x2 = 16 * Math.pow(Math.sin(t), 3);
+  const y2 = 13*Math.cos(t) - 5*Math.cos(2*t) - 2*Math.cos(3*t) - Math.cos(4*t);
+  const radial = Math.abs(x2);
+  const x = radial * Math.cos(phi);
+  const z = radial * Math.sin(phi) * 0.65;
+  return { x, y: y2, z };
+}
+
+function generateHeartPoints(n) {
+  const pts = [];
+  const s = HEART_SCALE / 16;
+  const surfaceN = Math.floor(n * 0.78);
+  for (let i = 0; i < surfaceN; i++) {
+    const t = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI * 2;
+    const { x, y, z } = heartSurface(t, phi);
+    pts.push(new THREE.Vector3(
+      x*s + (Math.random()-0.5)*0.18,
+      y*s + (Math.random()-0.5)*0.18,
+      z*s + (Math.random()-0.5)*0.18,
+    ));
+  }
+  for (let i = surfaceN; i < n; i++) {
+    const t = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI * 2;
+    const shrink = 0.45 + Math.random()*0.4;
+    const { x, y, z } = heartSurface(t, phi);
+    pts.push(new THREE.Vector3(x*s*shrink, y*s*shrink, z*s*shrink));
+  }
+  return pts;
+}
+
+const USER_IMAGES = [
+    'https://files.catbox.moe/jidrf5.jpg',
+  'https://files.catbox.moe/ebwkqs.jpg',
+  'https://files.catbox.moe/np805g.jpg',
+  'https://files.catbox.moe/jsy39g.jpg',
+  'https://files.catbox.moe/lq9ho9.jpg',
+  'https://files.catbox.moe/x3nfv1.jpg',
+  'https://files.catbox.moe/dwsmhl.jpg',
+  'https://files.catbox.moe/vd56tu.jpg',
+  'https://files.catbox.moe/zimpy5.jpg',
+];
+
+const loader = new THREE.TextureLoader();
+loader.crossOrigin = 'anonymous';
+const loaderEl = document.getElementById('loader');
+let loaded = 0;
+const TOTAL = HEART_COUNT + RING_COUNT;
+
+const userTextures = USER_IMAGES.map(url => {
+  const tex = loader.load(url, t => { t.colorSpace = THREE.SRGBColorSpace; });
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+});
+
+function makeSprite(seed, sizeMul = 1) {
+  const tex = userTextures[seed % userTextures.length];
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent:true, opacity:0.98 });
+  const sp = new THREE.Sprite(mat);
+  const sz = SPRITE_SIZE * (0.85 + Math.random()*0.5) * sizeMul;
+  sp.scale.set(sz, sz, sz);
+  sp.userData.baseScale = sz;
+  loaded++;
+  loaderEl.textContent = `Đã tải ${loaded}/${TOTAL}`;
+  if (loaded >= TOTAL) setTimeout(()=> loaderEl.style.display='none', 600);
+  return sp;
+}
+
+// ---------- glow halo ----------
+function makeGlowTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(128,128,0,128,128,128);
+  g.addColorStop(0, 'rgba(255,80,120,0.95)');
+  g.addColorStop(0.4, 'rgba(255,40,90,0.4)');
+  g.addColorStop(1, 'rgba(255,0,60,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,256,256);
+  return new THREE.CanvasTexture(c);
+}
+const glowTex = makeGlowTexture();
+const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: glowTex, transparent:true, blending: THREE.AdditiveBlending,
+  depthWrite:false, opacity:0.85,
+}));
+halo.scale.setScalar(HEART_SCALE * 2.6);
+halo.position.set(0, 0.5, -1);
+scene.add(halo);
+
+// heart group
+const heartGroup = new THREE.Group();
+scene.add(heartGroup);
+const heartPts = generateHeartPoints(HEART_COUNT);
+heartPts.forEach((p,i) => {
+  const sp = makeSprite(i);
+  sp.position.copy(p);
+  sp.userData.basePos = p.clone();
+  sp.userData.phase = Math.random() * Math.PI * 2;
+  heartGroup.add(sp);
+});
+
+// ---------- sparkles ----------
+const sparkGeom = new THREE.BufferGeometry();
+const SPARK_N = isMobile ? 200 : 400;
+const sparkPos = new Float32Array(SPARK_N * 3);
+for (let i = 0; i < SPARK_N; i++) {
+  const r = 13 + Math.random()*18;
+  const th = Math.random()*Math.PI*2;
+  const ph = Math.acos(2*Math.random()-1);
+  sparkPos[i*3]   = r*Math.sin(ph)*Math.cos(th);
+  sparkPos[i*3+1] = r*Math.sin(ph)*Math.sin(th);
+  sparkPos[i*3+2] = r*Math.cos(ph);
+}
+sparkGeom.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
+const sparkles = new THREE.Points(sparkGeom, new THREE.PointsMaterial({
+  color: 0xffd0e0, size: 0.22, transparent:true, opacity:0.9,
+  blending: THREE.AdditiveBlending, depthWrite:false, map: glowTex,
+}));
+scene.add(sparkles);
+
+// ---------- starfield ----------
+const starGeom = new THREE.BufferGeometry();
+const STAR_N = 500;
+const starPos = new Float32Array(STAR_N*3);
+for (let i = 0; i < STAR_N; i++) {
+  starPos[i*3]   = (Math.random()-0.5)*180;
+  starPos[i*3+1] = (Math.random()-0.5)*180;
+  starPos[i*3+2] = (Math.random()-0.5)*180;
+}
+starGeom.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+scene.add(new THREE.Points(starGeom, new THREE.PointsMaterial({
+  color:0xffffff, size:0.08, transparent:true, opacity:0.7,
+})));
+
+// ring group — orbits around heart
+const ringGroup = new THREE.Group();
+ringGroup.rotation.x = Math.PI * 0.18; // tilt
+scene.add(ringGroup);
+for (let i = 0; i < RING_COUNT; i++) {
+  const a = (i / RING_COUNT) * Math.PI * 2;
+  const sp = makeSprite(1000 + i);
+  sp.position.set(
+    Math.cos(a) * RING_RADIUS,
+    Math.sin(a*2) * 0.6,
+    Math.sin(a) * RING_RADIUS,
+  );
+  sp.userData.angle = a;
+  ringGroup.add(sp);
+}
+
+// ---------- floating love texts ----------
+function makeTextSprite(text, color = '#ff4d6d') {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.font = 'bold 76px "Brush Script MT", cursive';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = color; ctx.shadowBlur = 24;
+  ctx.fillStyle = color;
+  ctx.fillText(text, 256, 64);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.fillText(text, 256, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent:true });
+  const sp = new THREE.Sprite(mat);
+  sp.scale.set(6, 1.5, 1);
+  return sp;
+}
+
+const phrases = ['Làm ny anh nha 💕', 'I love you 💖', 'Em là của anh ♥', 'Forever ✨', 'Mãi yêu em 🌹'];
+const textGroup = new THREE.Group();
+scene.add(textGroup);
+phrases.forEach((txt, i) => {
+  const sp = makeTextSprite(txt);
+  const a = (i / phrases.length) * Math.PI * 2;
+  const r = 14;
+  sp.position.set(Math.cos(a)*r, (i%2?1:-1)*3 + Math.sin(a)*2, Math.sin(a)*r);
+  sp.userData.angle = a;
+  sp.userData.baseY = sp.position.y;
+  textGroup.add(sp);
+});
+
+// lights
+scene.add(new THREE.AmbientLight(0xffffff, 1));
+const glow = new THREE.PointLight(0xff2244, 2.5, 40);
+scene.add(glow);
+
+// ---------- animate ----------
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // heartbeat (double-thump like real heart)
+  const pulse = Math.pow(Math.max(0, Math.sin(t*1.6)), 6)*0.08
+              + Math.pow(Math.max(0, Math.sin(t*1.6 + 0.35)), 6)*0.05;
+  const beat = 1 + pulse;
+  heartGroup.scale.setScalar(beat);
+
+  // halo pulses with the heartbeat
+  halo.scale.setScalar(HEART_SCALE * (2.6 + pulse*4));
+  halo.material.opacity = 0.75 + pulse*2;
+
+  // sparkles slowly swirl + twinkle
+  sparkles.rotation.y = t * 0.08;
+  sparkles.rotation.x = Math.sin(t*0.1)*0.3;
+  sparkles.material.opacity = 0.7 + Math.sin(t*2)*0.2;
+
+  // ring orbits
+  ringGroup.rotation.y = t * 0.4;
+  ringGroup.children.forEach((sp,i) => {
+    const a = sp.userData.angle + t*0.2;
+    sp.position.y = Math.sin(a*2 + t)*0.8;
+  });
+
+  // texts orbit slowly opposite
+  textGroup.rotation.y = -t * 0.15;
+  textGroup.children.forEach((sp,i) => {
+    sp.position.y = sp.userData.baseY + Math.sin(t*1.2 + i)*0.5;
+  });
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
